@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Old Reddit</string>
+    <string name="title_activity_main">Old Reddit</string>
+    <string name="package_name">com.ajsoftware.oldreddit</string>
+    <string name="custom_url_scheme">com.ajsoftware.oldreddit</string>
+</resources>
