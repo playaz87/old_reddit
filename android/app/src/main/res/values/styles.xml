@@ -17,6 +17,10 @@
 
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <!-- Pre-Android-12: full-screen splash drawable (dark + Old Reddit mark). -->
         <item name="android:background">@drawable/splash</item>
+        <!-- Android 12+ system splash: dark background behind the (new) launcher
+             icon, so there is no white flash before the webview loads. -->
+        <item name="windowSplashScreenBackground">@color/splashBackground</item>
     </style>
 </resources>

@@ -27,7 +27,8 @@
         padding: 24px;
       }
       #splash .logo {
-        font-size: 44px;
+        width: 96px;
+        height: 96px;
       }
       #splash h1 {
         margin: 0;
@@ -56,7 +57,16 @@
   </head>
   <body>
     <div id="splash">
-      <div class="logo">👽</div>
+      <svg class="logo" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <line x1="512" y1="372" x2="512" y2="302" stroke="#ff4500" stroke-width="24" stroke-linecap="round" />
+        <circle cx="512" cy="286" r="32" fill="#ff4500" />
+        <circle cx="512" cy="520" r="152" fill="#f6f7f8" />
+        <circle cx="462" cy="510" r="37" fill="#ff4500" />
+        <circle cx="562" cy="510" r="37" fill="#ff4500" />
+        <circle cx="462" cy="510" r="13" fill="#15171a" />
+        <circle cx="562" cy="510" r="13" fill="#15171a" />
+        <path d="M448 588 Q512 634 576 588" stroke="#ff4500" stroke-width="21" fill="none" stroke-linecap="round" />
+      </svg>
       <h1>Old Reddit</h1>
       <div class="spinner"></div>
       <p id="status">Loading old.reddit.com…</p>

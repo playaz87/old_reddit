@@ -1,10 +1,29 @@
 # Old Reddit Mobile
 
 An Android app that loads **old.reddit.com** in a native WebView and injects a
-responsive stylesheet so the classic old-reddit layout is comfortable on a phone.
-It uses the public website only — **no Reddit API** — so it is unaffected by
-Reddit's API-key revocation. You log in with your normal reddit username/password
-inside the app and the session persists.
+clean, Reddit-is-Fun-style mobile layer so the classic old-reddit experience is
+comfortable on a phone. It uses the public website only — **no Reddit API** — so
+it is unaffected by Reddit's API-key revocation. You log in with your normal
+reddit username/password inside the app and the session persists.
+
+## Features
+
+- **Clean dark restyle** — old reddit collapsed to a single-column, card-based,
+  dark theme with large tap targets. Per-subreddit custom stylesheets are
+  stripped so every subreddit looks consistent.
+- **Subreddit switcher** — a fixed top bar + slide-in drawer (tap ☰). From it
+  you can:
+  - type any subreddit and go straight to it (Enter or the "Go to r/…" row),
+  - search *all* of reddit as you type (not just subs you follow),
+  - browse your **subscribed** subreddits,
+  - jump to **Front Page / Popular / All**.
+- **Favourites & history (RIF-style)** — star any subreddit (★ in the bar or
+  next to any row) to save it without subscribing, and every subreddit you visit
+  is remembered under **Recent**. Both persist across sessions in the
+  old.reddit.com origin's `localStorage`.
+- **No bounce to new reddit** — any `*.reddit.com` link (galleries, media,
+  "continue this thread", cross-posts) is rewritten to `old.reddit.com`, so
+  images and posts never open in the new-reddit UI.
 
 ## How it works
 
@@ -12,12 +31,14 @@ inside the app and the session persists.
 - On launch (`src/main.ts`) it opens a full-screen in-app WebView
   ([`@capgo/capacitor-inappbrowser`](https://www.npmjs.com/package/@capgo/capacitor-inappbrowser))
   pointed at `https://old.reddit.com/`.
-- On every page load it injects a mobile viewport + stylesheet
-  (`src/old-reddit-mobile.ts`). `preShowScript` styles the first page *before* it
-  is shown (no flash of unstyled desktop reddit); `urlChangeEvent` /
-  `browserPageLoaded` re-inject on every subsequent navigation.
+- On every page load it injects a mobile viewport, the stylesheet, and the
+  switcher / link-hardening JS (`src/old-reddit-mobile.ts`). `preShowScript`
+  styles the first page *before* it is shown (no flash of unstyled desktop
+  reddit); `urlChangeEvent` / `browserPageLoaded` re-inject on every subsequent
+  navigation. All injection is idempotent.
 - The Android hardware back button navigates the webview's history
-  (`activeNativeNavigationForWebview`).
+  (`activeNativeNavigationForWebview`); `openBlankTargetInWebView` keeps
+  `target="_blank"` links inside the styled webview.
 
 ## Prerequisites
 
@@ -67,13 +88,15 @@ live reddit page, and tweak selectors there before baking them into the CSS.
 
 - **Login:** use reddit **username/password**. "Continue with Google/Apple"
   buttons are typically blocked inside WebViews (`disallowed_useragent`).
-- **External links** currently open inside the same WebView (hardware back
-  returns). Routing non-reddit links to the system browser is an easy future
-  addition in `src/main.ts`.
-- **Dark mode** is not themed in v1. Easiest add: DarkReader via `preShowScript`
-  (the plugin supports it) or reddit's own night mode with an account pref.
-- Old reddit markup is stable but not frozen — treat the CSS selectors as living
-  code.
+- **Subscribed list & all-reddit search** need you to be logged in (they call
+  old.reddit's own JSON endpoints with your session cookie). Favourites, history
+  and typing a subreddit by name work logged-out too. The subscribed list is
+  cached for an hour and refreshed when you open the drawer.
+- **External (non-reddit) links** open inside the same WebView; the hardware
+  back button returns. Only reddit hostnames are rewritten — image hosts
+  (`i.redd.it`, `preview.redd.it`) and third-party sites are left untouched.
+- Old reddit markup is stable but not frozen — treat the CSS selectors and the
+  injected DOM hooks as living code.
 
 ## Project layout
 

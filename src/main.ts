@@ -59,6 +59,10 @@ async function launch(): Promise<void> {
       preShowScript: buildInjectionCode(),
       // Android hardware back button navigates the webview's history.
       activeNativeNavigationForWebview: true,
+      // Keep target="_blank" links (some media / cross-posts) in the same
+      // managed webview so they get styled and never bounce to the system
+      // browser or new reddit; the in-page rewrite also pins them to old.reddit.
+      openBlankTargetInWebView: true,
       // Lets you attach chrome://inspect during development; harmless in prod.
       isInspectable: true,
     });

@@ -1,75 +1,131 @@
 /**
- * Responsive restyle for old.reddit.com so it is comfortable on a phone.
+ * Mobile restyle + navigation layer for old.reddit.com.
  *
- * This is the core, living deliverable. old.reddit.com ships a fixed desktop
- * layout (no mobile viewport, ~1000px min width, tiny tap targets). The CSS
- * below is injected into the WebView on every page load to:
- *   - force a proper mobile viewport
- *   - collapse the desktop layout to a single full-width column
- *   - hide the right sidebar and the noisier header chrome
- *   - bump font sizes and tap-target sizes (vote arrows, links, buttons)
- *   - tame deep comment-tree indentation
- *   - hide promoted / ad posts
+ * old.reddit.com ships a fixed desktop layout (no mobile viewport, ~1000px min
+ * width, tiny tap targets) and is otherwise feature-frozen. Everything this app
+ * adds therefore lives in code injected into the WebView on every page load:
+ *
+ *   1. A clean, dark, Reddit-is-Fun-style restyle (see {@link oldRedditMobileCss}).
+ *      Per-subreddit custom stylesheets are stripped so the look is consistent.
+ *   2. A subreddit switcher: a fixed top bar + slide-in drawer that lets you
+ *      jump to any subreddit by typing it, search all of reddit, browse your
+ *      subscribed subs, and keep starred favourites + a visited-history list
+ *      (RIF-style — you can save subs without subscribing). Favourites/history
+ *      persist in localStorage on the old.reddit.com origin.
+ *   3. Link hardening: any *.reddit.com link (galleries, media, "continue this
+ *      thread", etc.) is rewritten to old.reddit.com so nothing ever bounces
+ *      the user into the new-reddit UI.
+ *
+ * The injected JS (see {@link switcherScript}) is plain ES5-ish browser code; it
+ * runs in the page's own origin, so fetch() is authenticated and localStorage
+ * is shared across navigations.
  *
  * Treat the selectors as living code: old reddit markup is stable but not
  * frozen. Tweak freely while testing against real pages.
  */
 export const oldRedditMobileCss = `
-/* ---- global box model / kill horizontal overflow ---------------------- */
+/* ===================================================================== *
+ *  Theme tokens
+ * ===================================================================== */
+:root {
+  --orm-bg:      #0e0e0f;
+  --orm-card:    #1a1a1b;
+  --orm-card-2:  #202021;
+  --orm-border:  #343536;
+  --orm-hair:    rgba(128,128,128,0.16);
+  --orm-text:    #d7dadc;
+  --orm-muted:   #818384;
+  --orm-accent:  #ff4500;
+  --orm-link:    #6fb3ff;
+  --orm-bar-h:   46px;
+}
+
+/* ===================================================================== *
+ *  Global box model / overflow / dark base
+ * ===================================================================== */
 *, *::before, *::after { box-sizing: border-box !important; }
 
 html, body {
   min-width: 0 !important;
   max-width: 100% !important;
-  overflow-x: hidden !important;
   -webkit-text-size-adjust: 100% !important;
+  background: var(--orm-bg) !important;
+  color: var(--orm-text) !important;
 }
+/* Clip horizontal overflow on <html> ONLY. Putting overflow-x on <body> too
+   makes body a second scroll container, which breaks position:sticky on the
+   header. One scroll container = sticky works. */
+html { overflow-x: hidden !important; }
+body { overflow-x: visible !important; }
 
 body {
   font-size: 15px !important;
   line-height: 1.45 !important;
+  padding-top: var(--orm-bar-h) !important;   /* room for our fixed top bar */
+  font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
 }
 
-/* ---- hide desktop-only chrome ---------------------------------------- */
+/* Default text colour for the bulk of reddit's content containers. Kept off
+   "*" so flair/sprites that rely on their own colour are left alone. */
+.content, .sitetable, .thing, .entry, .usertext-body, .md, .panestack,
+.commentarea, .menuarea, .infobar, p, li, td, th, dd, dt, label, .title-text {
+  color: var(--orm-text) !important;
+}
+
+a, a:link { color: var(--orm-link) !important; }
+.tagline, .tagline *, .subreddit, .domain, .domain a,
+.flat-list.buttons li a, .comment .tagline a { color: var(--orm-muted) !important; }
+
+/* ===================================================================== *
+ *  Hide desktop-only chrome / ads / nags
+ * ===================================================================== */
 .side,                       /* right sidebar (subreddit info, ads, rules) */
-#sr-header-area,             /* tiny top "subreddit list" bar             */
+#sr-header-area,             /* top "subreddit list" bar (our drawer replaces it) */
+.listing-chooser,            /* desktop left rail (grey strip); drawer replaces it */
 .listingsignupbar,
 .infobar.listingsignup,
-.footer-parent,              /* desktop footer links                       */
+.cookie-infobar, .eu-cookie-banner, #eu-cookie-policy,
+.footer-parent,              /* desktop footer links */
 .debuginfo,
-.promotedlink,               /* promoted posts in listings                 */
+.promotedlink,               /* promoted posts in listings */
 .thing.promoted,
-.ad-container, .ad-container-wrap,
-#ad_main, .promotedlink.promoted { display: none !important; }
+.ad-container, .ad-container-wrap, .ad-container-mobile,
+#ad_main, .promotedlink.promoted,
+.premium-banner-outter, .gold-page-ad,
+.give-gold-button, .gilded-icon { display: none !important; }
 
-/* ---- main content goes full width ----------------------------------- */
-.content[role="main"],
-.content {
+/* ===================================================================== *
+ *  Main content full width
+ * ===================================================================== */
+.content[role="main"], .content {
   margin: 0 !important;
-  padding: 6px 8px !important;
+  padding: 4px 0 24px !important;
   width: 100% !important;
   max-width: 100% !important;
 }
 
-/* ---- header: drop the logo, lay out as stacked rows ----------------- */
+/* ===================================================================== *
+ *  old reddit's own header — keep the sort tabs + search, drop the rest.
+ *  (Our fixed bar sits above it and carries subreddit navigation.)
+ * ===================================================================== */
 #header {
   overflow: visible !important;
-  position: relative !important;
+  /* Sticky directly beneath our fixed switcher bar so the sort tabs
+     (hot/new/top) + search stay reachable while scrolling. */
+  position: sticky !important;
+  top: var(--orm-bar-h) !important;
+  z-index: 2147483599 !important;   /* just under #orm-bar (…600) */
   display: flex !important;
   flex-wrap: wrap !important;
   align-items: center !important;
   padding: 4px 8px !important;
+  background: var(--orm-card) !important;
+  border-bottom: 1px solid var(--orm-border) !important;
 }
+#header-img-a, #header-img,
+#header a.default-header, #header .default-header,
+.pagename.redditname { display: none !important; }   /* logo + redundant name */
 
-/* remove the reddit logo / snoo to reclaim the space */
-#header-img-a,
-#header-img,
-#header a.default-header,
-#header .default-header { display: none !important; }
-
-/* Row 1: the user / messages controls. old reddit positions this absolutely in
-   the corner; pull it into the normal flow as the header's top row so it's fully
-   visible and tappable. */
 #header-bottom-right {
   order: 1 !important;
   flex: 1 1 100% !important;
@@ -77,150 +133,276 @@ body {
   margin: 0 !important;
   padding: 2px 0 !important;
   background: transparent !important;
-  color: inherit !important;
+  color: var(--orm-muted) !important;
   text-align: right !important;
 }
-#header-bottom-right .user,
-#header-bottom-right .user a { color: inherit !important; }
+#header-bottom-right a, #header-bottom-right .user a { color: var(--orm-muted) !important; }
 
-/* Row 2: page name + tab menu */
 #header-bottom-left {
   order: 2 !important;
   flex: 1 1 100% !important;
   padding-bottom: 4px !important;
   min-width: 0 !important;
 }
+/* sort tabs (hot / new / top …) as a scrollable segmented chip bar */
+#header-bottom-left .tabmenu {
+  display: flex !important;
+  gap: 6px !important;
+  align-items: center !important;
+  margin: 0 !important;
+  padding: 4px 8px 6px !important;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  scrollbar-width: none !important;             /* hide the scrollbar, keep the scroll */
+}
+#header-bottom-left .tabmenu::-webkit-scrollbar { display: none !important; }
+#header-bottom-left .tabmenu li { display: inline-block !important; margin: 0 !important; }
+#header-bottom-left .tabmenu li a.choice {
+  display: block !important;
+  padding: 7px 14px !important;
+  border-radius: 999px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  text-transform: capitalize !important;
+  white-space: nowrap !important;
+  color: var(--orm-text) !important;
+  background: var(--orm-card-2) !important;
+  border: 1px solid var(--orm-border) !important;
+}
+#header-bottom-left .tabmenu li a.choice:active { background: var(--orm-border) !important; }
+#header-bottom-left .tabmenu li.selected a.choice {
+  background: var(--orm-accent) !important;
+  color: #fff !important;
+  border-color: var(--orm-accent) !important;
+}
 
-#header-bottom-left .tabmenu { overflow-x: auto !important; white-space: nowrap !important; }
-#header-bottom-left .tabmenu li a,
-#header-bottom-right a,
-#header-bottom-right .user a {
+/* user / preferences / logout links on the right */
+#header-bottom-right a, #header-bottom-right .user a {
   font-size: 14px !important;
   padding: 8px 6px !important;
   display: inline-block !important;
 }
+.pagename, #header .pagename { font-size: 16px !important; }
 
-.pagename, #header .pagename { font-size: 18px !important; }
-
-/* search box full width and tappable */
 #search input[type="text"] {
   width: 100% !important;
-  font-size: 16px !important;       /* >=16px stops iOS/Android zoom-on-focus */
+  font-size: 16px !important;       /* >=16px stops zoom-on-focus */
   padding: 10px !important;
+  background: var(--orm-bg) !important;
+  color: var(--orm-text) !important;
+  border: 1px solid var(--orm-border) !important;
+  border-radius: 8px !important;
 }
 
-/* ---- link listing rows ---------------------------------------------- */
-#siteTable { margin: 0 !important; }
+/* ===================================================================== *
+ *  Link listing — Reddit-is-Fun style cards
+ * ===================================================================== */
+#siteTable, .sitetable { margin: 0 !important; }
 
 .thing {
-  padding: 6px 0 !important;
-  border-bottom: 1px solid rgba(128,128,128,0.18) !important;
+  background: var(--orm-card) !important;
+  border: 1px solid var(--orm-border) !important;
+  border-radius: 10px !important;
+  margin: 6px 6px !important;
+  padding: 8px 10px !important;
+  overflow: hidden !important;
+}
+.thing.stickied { border-color: rgba(75,160,90,0.5) !important; }
+
+/* Listing cards use flexbox instead of old reddit's floats. Floats made the
+   entry content (preview button + action buttons) wrap *around* the thumbnail
+   inconsistently — sometimes onto a second line. As a single flex row (NOWRAP)
+   the columns are fixed: [votes] [thumbnail] [entry fills the rest], so the
+   votes sit on the same row as the title and every card aligns. */
+#siteTable .thing.link {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: flex-start !important;
+}
+#siteTable .thing.link > .midcol { order: 0 !important; float: none !important; }
+#siteTable .thing.link > .thumbnail { order: 1 !important; float: none !important; }
+#siteTable .thing.link > .entry { order: 2 !important; flex: 1 1 0 !important; min-width: 0 !important; float: none !important; }
+/* drop the 1./2./3. rank number and the empty presentational siblings that
+   would otherwise force extra full-width rows under nowrap. */
+#siteTable .thing.link > .rank,
+#siteTable .thing.link > p.parent,
+#siteTable .thing.link > .clearleft,
+#siteTable .thing.link > .child { display: none !important; }
+
+/* nested comment .thing should NOT get the card / flex treatment */
+.commentarea .thing, .comment .thing {
+  display: block !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  padding: 4px 0 !important;
 }
 
-/* vote column: enlarge the touch target around the tiny sprite arrows */
+/* vote column: keep the arrows a comfortable tap target. Card height is driven
+   by the entry column, so arrow size here costs no extra vertical space. */
 .midcol {
   margin: 0 6px 0 0 !important;
-  min-width: 38px !important;
+  min-width: 32px !important;
 }
-.arrow {
-  margin: 6px auto !important;
-  transform: scale(1.4);
-  transform-origin: center;
+.arrow { margin: 4px auto !important; transform: scale(1.3); transform-origin: center; }
+.midcol .score, .score.unvoted, .score.likes, .score.dislikes {
+  color: var(--orm-text) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
 }
 
-/* thumbnails: keep modest, never push layout */
+/* thumbnails: modest, rounded, never push layout */
 .thumbnail {
-  margin: 2px 8px 2px 0 !important;
-  max-width: 70px !important;
+  margin: 2px 10px 0 0 !important;
+  max-width: 74px !important;
   height: auto !important;
+  border-radius: 8px !important;
+  overflow: hidden !important;
 }
-.thumbnail img { max-width: 70px !important; height: auto !important; }
+.thumbnail img { max-width: 74px !important; height: auto !important; }
+
+/* preview / expando toggle: old reddit ships a light-grey sprite button that
+   floats and jumps around. Un-float it for a consistent slot and invert the
+   sprite so it reads as a dark control on the dark theme. */
+.entry .top-matter .expando-button {
+  float: none !important;
+  display: inline-block !important;
+  margin: 2px 0 !important;
+  border-radius: 6px !important;
+  filter: invert(0.88) !important;
+}
 
 /* titles + tagline */
 .link .entry { overflow: visible !important; }
 a.title {
-  font-size: 16px !important;
-  line-height: 1.35 !important;
+  font-size: 15px !important;
+  line-height: 1.3 !important;
   word-break: break-word !important;
+  color: var(--orm-text) !important;
+  font-weight: 600 !important;
 }
-.tagline { font-size: 12px !important; line-height: 1.5 !important; }
+a.title:visited { color: #9a9c9e !important; }
+.tagline { font-size: 11px !important; line-height: 1.45 !important; }
 .tagline a, .tagline time { white-space: normal !important; }
+.linkflairlabel, .flair {
+  border-radius: 4px !important;
+  font-size: 11px !important;
+  padding: 1px 6px !important;
+}
 
-/* the action buttons (comments / share / save ...) */
-.flat-list.buttons { line-height: 2 !important; }
+/* action buttons (comments / share / save ...): keep them on ONE line that
+   scrolls horizontally rather than wrapping to a ragged second row. */
+.flat-list.buttons {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  gap: 2px !important;
+  margin-top: 2px !important;
+  overflow-x: auto !important;
+  white-space: nowrap !important;
+  -webkit-overflow-scrolling: touch !important;
+  scrollbar-width: none !important;
+}
+.flat-list.buttons::-webkit-scrollbar { display: none !important; }
+.flat-list.buttons li { float: none !important; display: inline-block !important; margin: 0 !important; flex: 0 0 auto !important; }
 .flat-list.buttons li a {
   font-size: 13px !important;
-  padding: 4px 6px !important;
+  padding: 3px 6px !important;
   display: inline-block !important;
 }
+.entry .buttons li a.comments { color: var(--orm-link) !important; font-weight: 600 !important; }
 
-/* ---- self / link post body + comments ------------------------------- */
+/* the big "next/prev page" + "load more" buttons */
+.morelink, .morelink a {
+  background: var(--orm-accent) !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+}
+.morelink a { color: #fff !important; font-weight: 700 !important; }
+.nextprev a, .morechildren a {
+  background: var(--orm-card-2) !important;
+  border: 1px solid var(--orm-border) !important;
+  border-radius: 8px !important;
+  padding: 8px 12px !important;
+  color: var(--orm-text) !important;
+}
+
+/* ===================================================================== *
+ *  Self / link post body + comments
+ * ===================================================================== */
 .usertext-body, .md {
   font-size: 15px !important;
   line-height: 1.55 !important;
   max-width: 100% !important;
-  overflow-x: auto !important;       /* tables / code scroll, don't overflow */
+  overflow-x: auto !important;
 }
 .md img { max-width: 100% !important; height: auto !important; }
+.md a { color: var(--orm-link) !important; }
+.md blockquote { border-left: 3px solid var(--orm-border) !important; color: var(--orm-muted) !important; padding-left: 10px !important; margin-left: 0 !important; }
+.md code, .md pre { background: #000 !important; color: #d7dadc !important; border-radius: 6px !important; }
+.md pre { padding: 8px !important; }
+.md table, .md th, .md td { border-color: var(--orm-border) !important; }
 
-/* comment tree: shrink the per-level indent so deep threads stay readable */
-.commentarea .child,
-.commentarea .comment .child {
+.commentarea { padding: 0 6px !important; }
+.comment { border: 0 !important; }
+.commentarea .child, .commentarea .comment .child {
   margin-left: 8px !important;
-  padding-left: 6px !important;
-  border-left: 1px solid rgba(128,128,128,0.25) !important;
+  padding-left: 8px !important;
+  border-left: 2px solid var(--orm-hair) !important;
 }
 .comment .entry { padding-bottom: 2px !important; }
-.comment .expand { padding: 0 6px !important; font-size: 15px !important; }
+.comment .expand { padding: 0 6px !important; font-size: 15px !important; color: var(--orm-muted) !important; }
+.comment.collapsed .entry .noncollapsed { color: var(--orm-muted) !important; }
+.usertext-body .md { background: transparent !important; }
 
-/* ---- forms (replying / posting) ------------------------------------- */
-textarea, input[type="text"], input[type="password"], input[type="url"] {
+/* ===================================================================== *
+ *  Forms / inputs / dropdowns (replies, login, sort menus)
+ * ===================================================================== */
+textarea, input[type="text"], input[type="password"], input[type="url"],
+input[type="search"], input[type="email"], input[type="number"], select {
   max-width: 100% !important;
   font-size: 16px !important;
+  background: var(--orm-card) !important;
+  color: var(--orm-text) !important;
+  border: 1px solid var(--orm-border) !important;
+  border-radius: 8px !important;
 }
-.usertext-edit textarea, .usertext-edit .md {
-  width: 100% !important;
-  max-width: 100% !important;
+.usertext-edit textarea, .usertext-edit .md { width: 100% !important; max-width: 100% !important; }
+.btn, button.btn, .pretty-button, input[type="submit"] {
+  background: var(--orm-card-2) !important;
+  color: var(--orm-text) !important;
+  border: 1px solid var(--orm-border) !important;
+  border-radius: 8px !important;
+  padding: 8px 12px !important;
 }
+.drop-choices, .drop-choices.srdrop {
+  background: var(--orm-card) !important;
+  border: 1px solid var(--orm-border) !important;
+}
+.drop-choices a.choice { color: var(--orm-text) !important; }
+.drop-choices a.choice:hover { background: var(--orm-card-2) !important; }
 
-/* ---- media never exceeds the viewport width ------------------------- */
-/* Replaced elements: clamp width, drop any forced min-width, keep ratio. */
+/* ===================================================================== *
+ *  Media never exceeds the viewport
+ * ===================================================================== */
 img, video, audio, iframe, embed, object, canvas, svg {
   max-width: 100% !important;
   min-width: 0 !important;
 }
-img, video, embed, object, canvas, svg {
-  height: auto !important;            /* preserve aspect ratio once width is clamped */
-}
+img, video, embed, object, canvas, svg { height: auto !important; }
 
-/* Wrapper/containers that carry inline pixel widths (gifs, gfycat/imgur
-   embeds, reddit's own video player). Constrain the box and clip overflow. */
-.expando,
-.media,
-.media-embed,
-.media-preview,
-.media-preview-content,
-.embedly,
-.reddit-video-player-root,
-.reddit-video,
-[class*="gallery"],
-[style*="width"] .media-preview {
+.expando, .media, .media-embed, .media-preview, .media-preview-content,
+.embedly, .reddit-video-player-root, .reddit-video,
+[class*="gallery"], [style*="width"] .media-preview {
   max-width: 100% !important;
   min-width: 0 !important;
   overflow: hidden !important;
 }
+.media-embed iframe, .expando iframe { width: 100% !important; }
 
-/* Embeds with no intrinsic ratio (iframes): fill the column width rather than a
-   fixed pixel width that overflows horizontally. */
-.media-embed iframe,
-.expando iframe { width: 100% !important; }
-
-/* Tall / portrait media: cap to the screen in BOTH dimensions and scale by the
-   element's own aspect ratio, so a portrait video/gif can't run off the bottom. */
-video,
-.expando img,
-.media-preview img,
-.media-preview-content img {
+video, .expando img, .media-preview img, .media-preview-content img {
   max-width: 100% !important;
   max-height: 85vh !important;
   width: auto !important;
@@ -228,17 +410,381 @@ video,
   margin: 0 auto !important;
   display: block !important;
 }
-/* let reddit's video player box follow the (now height-capped) video */
 .reddit-video-player-root { height: auto !important; max-height: 85vh !important; }
+
+/* ===================================================================== *
+ *  Injected subreddit switcher: top bar + drawer
+ * ===================================================================== */
+#orm-bar {
+  position: fixed !important;
+  top: 0; left: 0; right: 0;
+  height: var(--orm-bar-h);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  background: var(--orm-card);
+  border-bottom: 1px solid var(--orm-border);
+  z-index: 2147483600;
+}
+#orm-menu-btn, #orm-fav-btn {
+  background: none; border: 0; color: var(--orm-text);
+  font-size: 22px; line-height: 1; padding: 8px 10px; cursor: pointer;
+  border-radius: 8px;
+}
+#orm-menu-btn:active, #orm-fav-btn:active { background: var(--orm-card-2); }
+#orm-fav-btn.on { color: var(--orm-accent); }
+#orm-title {
+  flex: 1; min-width: 0;
+  font-size: 17px; font-weight: 700; color: var(--orm-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+#orm-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  opacity: 0; visibility: hidden;
+  transition: opacity .2s ease;
+  z-index: 2147483601;
+}
+#orm-drawer {
+  position: fixed; top: 0; left: 0; bottom: 0;
+  width: 86%; max-width: 360px;
+  background: var(--orm-card);
+  border-right: 1px solid var(--orm-border);
+  transform: translateX(-100%);
+  transition: transform .22s ease;
+  z-index: 2147483602;
+  display: flex; flex-direction: column;
+  box-shadow: 2px 0 18px rgba(0,0,0,0.5);
+}
+body.orm-open #orm-drawer { transform: translateX(0); }
+body.orm-open #orm-backdrop { opacity: 1; visibility: visible; }
+
+#orm-drawer-head { padding: 10px; border-bottom: 1px solid var(--orm-border); }
+#orm-search {
+  width: 100%; box-sizing: border-box;
+  font-size: 16px; padding: 11px 12px;
+  border-radius: 10px; border: 1px solid var(--orm-border);
+  background: var(--orm-bg); color: var(--orm-text);
+}
+#orm-search::placeholder { color: var(--orm-muted); }
+
+#orm-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 28px; }
+
+.orm-quick { display: flex; gap: 8px; padding: 10px; }
+.orm-chip {
+  flex: 1; padding: 11px 6px;
+  border-radius: 9px; border: 1px solid var(--orm-border);
+  background: var(--orm-card-2); color: var(--orm-text);
+  font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.orm-chip:active { background: var(--orm-border); }
+
+.orm-sec-title {
+  padding: 14px 12px 4px;
+  font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--orm-muted);
+}
+.orm-row {
+  display: flex; align-items: center;
+  padding: 12px; border-bottom: 1px solid var(--orm-hair);
+  cursor: pointer;
+}
+.orm-row:active { background: var(--orm-card-2); }
+.orm-row-name { flex: 1; min-width: 0; font-size: 15px; color: var(--orm-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.orm-star {
+  background: none; border: 0;
+  font-size: 20px; color: #5a5a5b; padding: 4px 6px; cursor: pointer;
+}
+.orm-star.on { color: var(--orm-accent); }
+.orm-go .orm-row-name { color: var(--orm-link); font-weight: 600; }
+.orm-go-arrow { color: var(--orm-accent); font-size: 18px; padding: 0 6px; }
+.orm-empty { padding: 16px 12px; color: var(--orm-muted); font-size: 13px; }
 `;
 
 /**
- * Returns a self-contained JS snippet (string) that forces a mobile viewport
- * and injects {@link oldRedditMobileCss}. Safe to run repeatedly — it is
- * idempotent (re-uses its <style> element and viewport meta).
+ * Plain browser JS (returned as a string) implementing the subreddit switcher,
+ * favourites/history, and reddit-link hardening. Runs in the old.reddit.com
+ * origin, so fetch() is authenticated and localStorage persists across loads.
  *
- * Built via JSON.stringify so the CSS is correctly escaped into a JS string
- * literal regardless of its contents.
+ * IMPORTANT: this is embedded inside the template literal returned by
+ * {@link buildInjectionCode}, so it must contain no backticks and no `${`.
+ */
+export const switcherScript = `
+function ormInit() {
+  var SPECIAL = { all:1, popular:1, friends:1, mod:1 };
+
+  function $(id){ return document.getElementById(id); }
+  function esc(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c];
+    });
+  }
+  function load(key, def){ try { var v = window.localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch(e){ return def; } }
+  function store(key, val){ try { window.localStorage.setItem(key, JSON.stringify(val)); } catch(e){} }
+
+  function getFavs(){ return load('orm_favs', []); }
+  function getRecent(){ return load('orm_recent', []); }
+  function getSubs(){ return load('orm_subs', { ts:0, names:[] }); }
+
+  function indexOfCI(arr, name){
+    var l = name.toLowerCase();
+    for (var i=0;i<arr.length;i++){ if (String(arr[i]).toLowerCase() === l) return i; }
+    return -1;
+  }
+  function isFav(name){ return indexOfCI(getFavs(), name) >= 0; }
+  function toggleFav(name){
+    var f = getFavs(); var i = indexOfCI(f, name);
+    if (i >= 0) { f.splice(i,1); }
+    else { f.push(name); f.sort(function(a,b){ return a.toLowerCase() < b.toLowerCase() ? -1 : 1; }); }
+    store('orm_favs', f);
+  }
+  function addRecent(name){
+    if (!name || SPECIAL[name.toLowerCase()]) return;
+    var r = getRecent(); var i = indexOfCI(r, name);
+    if (i >= 0) r.splice(i,1);
+    r.unshift(name);
+    if (r.length > 40) r = r.slice(0,40);
+    store('orm_recent', r);
+  }
+
+  function cleanName(n){ return String(n).replace(/^\\/?(r\\/)?/i, '').replace(/\\/.*$/, '').trim(); }
+  function currentSub(){
+    var m = location.pathname.match(/^\\/r\\/([^\\/]+)/i);
+    if (!m) return null;
+    if (m[1].indexOf('+') >= 0 || /^m\\b/i.test(m[1])) return null; /* multireddit */
+    return m[1];
+  }
+  function currentLabel(){
+    var s = currentSub();
+    if (s) return 'r/' + s;
+    if (location.pathname === '/' || /^\\/(hot|new|top|rising|controversial|best)\\b/.test(location.pathname)) return 'Front Page';
+    if (/^\\/user\\//i.test(location.pathname)) return location.pathname.replace(/\\/$/, '').replace(/^\\/user\\//i, 'u/');
+    if (location.pathname.length > 1) return location.pathname;
+    return 'reddit';
+  }
+
+  function goSub(name){ name = cleanName(name); if (name) location.assign('https://old.reddit.com/r/' + encodeURIComponent(name) + '/'); }
+  function goPath(p){ location.assign('https://old.reddit.com' + p); }
+
+  function fetchSubs(done){
+    fetch('/subreddits/mine/subscriber.json?limit=100', { credentials:'same-origin', headers:{ 'Accept':'application/json' } })
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        var names = [];
+        if (j && j.data && j.data.children) {
+          j.data.children.forEach(function(c){ if (c.data && c.data.display_name) names.push(c.data.display_name); });
+        }
+        names.sort(function(a,b){ return a.toLowerCase() < b.toLowerCase() ? -1 : 1; });
+        store('orm_subs', { ts: Date.now(), names: names });
+        if (done) done(names);
+      })
+      .catch(function(){ if (done) done(getSubs().names || []); });
+  }
+  function searchNames(q, done){
+    fetch('/api/search_reddit_names.json?query=' + encodeURIComponent(q) + '&include_over_18=true', { credentials:'same-origin' })
+      .then(function(r){ return r.json(); })
+      .then(function(j){ done((j && j.names) || []); })
+      .catch(function(){ done([]); });
+  }
+
+  function rowHtml(name){
+    var on = isFav(name) ? ' on' : '';
+    var glyph = isFav(name) ? '\\u2605' : '\\u2606';
+    return '<div class="orm-row" data-sub="' + esc(name) + '">'
+      + '<span class="orm-row-name">r/' + esc(name) + '</span>'
+      + '<button class="orm-star' + on + '" data-star="' + esc(name) + '" aria-label="favourite">' + glyph + '</button>'
+      + '</div>';
+  }
+  function sectionHtml(title, names){
+    if (!names || !names.length) return '';
+    var rows = '';
+    for (var i=0;i<names.length;i++) rows += rowHtml(names[i]);
+    return '<div class="orm-sec-title">' + esc(title) + '</div>' + rows;
+  }
+  function filterCI(arr, ql){
+    if (!ql) return arr.slice();
+    return arr.filter(function(n){ return String(n).toLowerCase().indexOf(ql) >= 0; });
+  }
+
+  function render(){
+    var q = $('orm-search').value.trim();
+    var ql = q.toLowerCase();
+    var html = '';
+
+    html += '<div class="orm-quick">'
+      + '<button class="orm-chip" data-path="/">Front</button>'
+      + '<button class="orm-chip" data-path="/r/popular/">Popular</button>'
+      + '<button class="orm-chip" data-path="/r/all/">All</button>'
+      + '</div>';
+
+    if (q) {
+      html += '<div class="orm-row orm-go" data-sub="' + esc(q) + '">'
+        + '<span class="orm-row-name">Go to r/' + esc(cleanName(q)) + '</span>'
+        + '<span class="orm-go-arrow">\\u2192</span></div>';
+    }
+
+    html += sectionHtml('\\u2605 Favourites', filterCI(getFavs(), ql));
+    html += sectionHtml('Subscribed', filterCI(getSubs().names, ql));
+    html += sectionHtml('Recent', filterCI(getRecent(), ql));
+
+    $('orm-list').innerHTML = html;
+
+    var rc = $('orm-results');
+    rc.innerHTML = '';
+    if (q.length >= 2) {
+      searchNames(q, function(names){
+        if ($('orm-search').value.trim() !== q) return; /* stale */
+        rc.innerHTML = sectionHtml('More subreddits', names.slice(0, 25));
+      });
+    }
+  }
+
+  var debounceTimer = null;
+  function debouncedRender(){
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(render, 220);
+  }
+
+  function openDrawer(){
+    document.body.classList.add('orm-open');
+    var c = getSubs();
+    if (!c.names.length || (Date.now() - c.ts) > 3600000) {
+      fetchSubs(function(){ if (document.body.classList.contains('orm-open')) render(); });
+    }
+    render();
+  }
+  function closeDrawer(){ document.body.classList.remove('orm-open'); }
+
+  function updateBar(){
+    var t = $('orm-title'); if (t) t.textContent = currentLabel();
+    var fb = $('orm-fav-btn'); if (!fb) return;
+    var s = currentSub();
+    if (s) {
+      fb.style.display = 'block';
+      var on = isFav(s);
+      fb.textContent = on ? '\\u2605' : '\\u2606';
+      fb.className = on ? 'on' : '';
+    } else {
+      fb.style.display = 'none';
+    }
+  }
+
+  function buildUI(){
+    if ($('orm-bar')) { updateBar(); return; }
+
+    var bar = document.createElement('div');
+    bar.id = 'orm-bar';
+    bar.innerHTML =
+      '<button id="orm-menu-btn" aria-label="subreddits">\\u2630</button>'
+      + '<div id="orm-title"></div>'
+      + '<button id="orm-fav-btn" aria-label="favourite current subreddit"></button>';
+    document.body.appendChild(bar);
+
+    var backdrop = document.createElement('div');
+    backdrop.id = 'orm-backdrop';
+    document.body.appendChild(backdrop);
+
+    var drawer = document.createElement('div');
+    drawer.id = 'orm-drawer';
+    drawer.innerHTML =
+      '<div id="orm-drawer-head">'
+      + '<input id="orm-search" type="text" inputmode="search" placeholder="Go to or search subreddits\\u2026"'
+      + ' autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" /></div>'
+      + '<div id="orm-scroll"><div id="orm-list"></div><div id="orm-results"></div></div>';
+    document.body.appendChild(drawer);
+
+    $('orm-menu-btn').addEventListener('click', openDrawer);
+    $('orm-title').addEventListener('click', openDrawer);
+    backdrop.addEventListener('click', closeDrawer);
+    $('orm-fav-btn').addEventListener('click', function(){
+      var s = currentSub();
+      if (s) { toggleFav(s); updateBar(); if (document.body.classList.contains('orm-open')) render(); }
+    });
+
+    var search = $('orm-search');
+    search.addEventListener('input', debouncedRender);
+    search.addEventListener('keydown', function(e){
+      if (e.key === 'Enter' || e.keyCode === 13) {
+        e.preventDefault();
+        var q = search.value.trim();
+        if (q) goSub(q);
+      }
+    });
+
+    drawer.addEventListener('click', function(e){
+      var t = e.target;
+      var star = t && t.closest ? t.closest('.orm-star') : null;
+      if (star) { e.stopPropagation(); toggleFav(star.getAttribute('data-star')); updateBar(); render(); return; }
+      var chip = t && t.closest ? t.closest('.orm-chip') : null;
+      if (chip) { goPath(chip.getAttribute('data-path')); return; }
+      var row = t && t.closest ? t.closest('.orm-row') : null;
+      if (row) { goSub(row.getAttribute('data-sub')); return; }
+    });
+
+    document.addEventListener('keydown', function(e){
+      if ((e.key === 'Escape' || e.keyCode === 27) && document.body.classList.contains('orm-open')) closeDrawer();
+    });
+
+    updateBar();
+  }
+
+  /* ---- reddit-link hardening: keep everything on old.reddit.com --------- */
+  function rewriteHref(raw){
+    try {
+      var u = new URL(raw, location.href);
+      var h = u.hostname.toLowerCase();
+      if (/(^|\\.)reddit\\.com$/.test(h) && h !== 'old.reddit.com') {
+        u.hostname = 'old.reddit.com';
+        u.protocol = 'https:';
+        return u.href;
+      }
+    } catch(e){}
+    return null;
+  }
+  function sweepLinks(root){
+    var as = (root || document).querySelectorAll('a[href]');
+    for (var i=0;i<as.length;i++){
+      var r = rewriteHref(as[i].href);
+      if (r) as[i].href = r;
+    }
+  }
+
+  function installOnce(){
+    if (window.__ormGlobals) return;
+    window.__ormGlobals = true;
+
+    /* capture-phase rewrite catches links added after the initial sweep */
+    document.addEventListener('click', function(e){
+      var t = e.target;
+      var a = t && t.closest ? t.closest('a[href]') : null;
+      if (!a) return;
+      var r = rewriteHref(a.href);
+      if (r) a.href = r;
+    }, true);
+  }
+
+  /* ---- run ------------------------------------------------------------- */
+  installOnce();
+  sweepLinks(document);
+  addRecent(currentSub());
+  buildUI();
+}
+`;
+
+/**
+ * Returns a self-contained JS snippet (string) that forces a mobile viewport,
+ * strips per-subreddit custom stylesheets, injects {@link oldRedditMobileCss},
+ * and wires up the subreddit switcher / link hardening ({@link switcherScript}).
+ *
+ * Safe to run repeatedly — every step is idempotent (re-uses its <style>, meta,
+ * and DOM nodes by id; global listeners install once via a window flag).
+ *
+ * The CSS is embedded via JSON.stringify so it is correctly escaped into a JS
+ * string literal regardless of its contents; the switcher source is inlined
+ * verbatim (it deliberately contains no backticks or template placeholders).
  */
 export function buildInjectionCode(): string {
   return `(function () {
@@ -253,6 +799,17 @@ export function buildInjectionCode(): string {
     }
     v.setAttribute('content', 'width=device-width, initial-scale=1, viewport-fit=cover');
 
+    // Strip per-subreddit custom CSS so the restyle is consistent everywhere.
+    // Primary hook is the documented title attr; the redditmedia.com fallback
+    // catches the subreddit stylesheet by host (reddit's own core CSS is served
+    // from redditstatic.com, so this never removes the base styles).
+    var subStyles = document.querySelectorAll(
+      'link[title="applied_subreddit_stylesheet"], style[title="applied_subreddit_stylesheet"], link[rel~="stylesheet"][href*="redditmedia.com"]'
+    );
+    for (var i = 0; i < subStyles.length; i++) {
+      if (subStyles[i].parentNode) subStyles[i].parentNode.removeChild(subStyles[i]);
+    }
+
     var ID = '__old_reddit_mobile_style__';
     var el = document.getElementById(ID);
     if (!el) {
@@ -262,6 +819,14 @@ export function buildInjectionCode(): string {
       head.appendChild(el);
     }
     el.textContent = ${JSON.stringify(oldRedditMobileCss)};
+
+    ${switcherScript}
+
+    if (document.body) {
+      ormInit();
+    } else {
+      document.addEventListener('DOMContentLoaded', function () { try { ormInit(); } catch (e) {} });
+    }
   } catch (e) {
     /* swallow — never break the page */
   }

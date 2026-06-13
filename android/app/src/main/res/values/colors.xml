@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Referenced by styles.xml (AppTheme). These were previously undefined,
+         which would fail the resource compile. Themed to match the app. -->
+    <color name="colorPrimary">#1A1A1B</color>
+    <color name="colorPrimaryDark">#0E0E0F</color>
+    <color name="colorAccent">#FF4500</color>
+    <!-- Splash background (Android 12+ system splash + launch window). -->
+    <color name="splashBackground">#1A1A1B</color>
+</resources>
