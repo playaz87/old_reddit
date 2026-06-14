@@ -220,8 +220,10 @@ a, a:link { color: var(--orm-link) !important; }
   flex-wrap: nowrap !important;
   align-items: flex-start !important;
 }
-#siteTable .thing.link > .midcol { order: 0 !important; float: none !important; }
-#siteTable .thing.link > .thumbnail { order: 1 !important; float: none !important; }
+/* Pin the side columns to fixed widths so the entry's left offset is a known
+   constant (used by the full-width preview rule further down). */
+#siteTable .thing.link > .midcol { order: 0 !important; float: none !important; flex: 0 0 36px !important; }
+#siteTable .thing.link > .thumbnail { order: 1 !important; float: none !important; flex: 0 0 70px !important; }
 #siteTable .thing.link > .entry { order: 2 !important; flex: 1 1 0 !important; min-width: 0 !important; float: none !important; }
 /* drop the 1./2./3. rank number and the empty presentational siblings that
    would otherwise force extra full-width rows under nowrap. */
@@ -244,7 +246,7 @@ a, a:link { color: var(--orm-link) !important; }
    by the entry column, so arrow size here costs no extra vertical space. */
 .midcol {
   margin: 0 6px 0 0 !important;
-  min-width: 32px !important;
+  min-width: 36px !important;
 }
 .arrow { margin: 4px auto !important; transform: scale(1.3); transform-origin: center; }
 .midcol .score, .score.unvoted, .score.likes, .score.dislikes {
@@ -256,12 +258,12 @@ a, a:link { color: var(--orm-link) !important; }
 /* thumbnails: modest, rounded, never push layout */
 .thumbnail {
   margin: 2px 10px 0 0 !important;
-  max-width: 74px !important;
+  width: 70px !important;
   height: auto !important;
   border-radius: 8px !important;
   overflow: hidden !important;
 }
-.thumbnail img { max-width: 74px !important; height: auto !important; }
+.thumbnail img { max-width: 100% !important; height: auto !important; }
 
 /* preview / expando toggle: old reddit ships a light-grey sprite button that
    floats and jumps around. Un-float it for a consistent slot and invert the
@@ -272,6 +274,26 @@ a, a:link { color: var(--orm-link) !important; }
   margin: 2px 0 !important;
   border-radius: 6px !important;
   filter: invert(0.88) !important;
+}
+
+/* Expanded preview spans the FULL card width, not just the (narrower) entry
+   column. The expando is nested in .entry, which begins after the vote (+ maybe
+   thumbnail) columns, so wide media (reddit-video) and text previews would
+   otherwise be confined to that column. Pull the expando left by the exact width
+   of the preceding columns so it reaches the card's content edge, and lift the
+   inherited max-width:100% clamp (relative to .entry) so the box can widen.
+
+   Two cases, keyed on whether the card actually has a thumbnail column (both
+   media posts and self posts may have one; pure-text posts often have none):
+     - with thumbnail:    midcol(36) + 6 + thumbnail(70) + 10 = 122px
+     - without thumbnail:  midcol(36) + 6                      =  42px */
+#siteTable .thing.link:has(> .thumbnail) .entry > .expando {
+  margin-left: calc(-1 * (36px + 6px + 70px + 10px)) !important;
+  max-width: none !important;
+}
+#siteTable .thing.link:not(:has(> .thumbnail)) .entry > .expando {
+  margin-left: calc(-1 * (36px + 6px)) !important;
+  max-width: none !important;
 }
 
 /* titles + tagline */
