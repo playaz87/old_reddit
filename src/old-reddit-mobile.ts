@@ -524,6 +524,34 @@ body.orm-open #orm-backdrop { opacity: 1; visibility: visible; }
 .orm-go .orm-row-name { color: var(--orm-link); font-weight: 600; }
 .orm-go-arrow { color: var(--orm-accent); font-size: 18px; padding: 0 6px; }
 .orm-empty { padding: 16px 12px; color: var(--orm-muted); font-size: 13px; }
+
+#orm-ptr {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  height: var(--orm-bar-h) !important;
+  pointer-events: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: var(--orm-card-2) !important;
+  border-bottom: 1px solid var(--orm-border) !important;
+  box-shadow: 0 6px 14px rgba(0,0,0,0.35) !important;
+  transform: translateY(calc(-1 * var(--orm-bar-h))) !important;
+  transition: transform .16s ease !important;
+  z-index: 2147483604 !important;
+}
+#orm-ptr-inner {
+  padding: 0 12px !important;
+  color: var(--orm-muted) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+}
+body.orm-ptr-visible #orm-ptr { transform: translateY(0) !important; }
+body.orm-ptr-ready #orm-ptr-inner {
+  color: var(--orm-accent) !important;
+}
 `;
 
 /**
@@ -537,6 +565,19 @@ body.orm-open #orm-backdrop { opacity: 1; visibility: visible; }
 export const switcherScript = `
 function ormInit() {
   var SPECIAL = { all:1, popular:1, friends:1, mod:1 };
+  var FEED_CACHE_KEY = 'orm_feed_cache_v1';
+  var FEED_MARK_KEY = 'orm_feed_mark_v1';
+  var FEED_SKIP_RESTORE_KEY = 'orm_feed_skip_restore_once_v1';
+  var FEED_CACHE_TTL_MS = 20 * 60 * 1000;
+  var FEED_MARK_TTL_MS = 30 * 60 * 1000;
+  var FEED_SKIP_RESTORE_TTL_MS = 15 * 1000;
+  var FEED_CACHE_MAX = 10;
+  var PTR_THRESHOLD_PX = 92;
+  var PTR_MAX_PULL_PX = 140;
+  var ptrActive = false;
+  var ptrStartY = 0;
+  var ptrPull = 0;
+  var ptrReloading = false;
 
   function $(id){ return document.getElementById(id); }
   function esc(s){
@@ -550,6 +591,180 @@ function ormInit() {
   function getFavs(){ return load('orm_favs', []); }
   function getRecent(){ return load('orm_recent', []); }
   function getSubs(){ return load('orm_subs', { ts:0, names:[] }); }
+  function nowMs(){ return Date.now ? Date.now() : (new Date()).getTime(); }
+  function currentUrl(){ return location.origin + location.pathname + location.search; }
+  function loadSession(key, def){ try { var v = window.sessionStorage.getItem(key); return v ? JSON.parse(v) : def; } catch(e){ return def; } }
+  function atTop(){
+    return (window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0) <= 0;
+  }
+  function isFeedPath(path){
+    if (!path) return false;
+    if (/^\\/r\\/[^\\/]+\\/comments\\//i.test(path)) return false;
+    if (path === '/') return true;
+    if (/^\\/(hot|new|top|rising|controversial|best)\\/?$/i.test(path)) return true;
+    if (/^\\/r\\/(all|popular)\\/?$/i.test(path)) return true;
+    if (/^\\/r\\/[^\\/]+\\/?$/i.test(path)) return true;
+    if (/^\\/r\\/[^\\/]+\\/(hot|new|top|rising|controversial|best)\\/?$/i.test(path)) return true;
+    return false;
+  }
+  function getFeedContainer(){
+    return document.querySelector('#siteTable.sitetable')
+      || document.querySelector('#siteTable')
+      || document.querySelector('.sitetable');
+  }
+  function readFeedCache(){
+    var cache = loadSession(FEED_CACHE_KEY, { entries: [] });
+    if (!cache || !cache.entries || !cache.entries.length) return { entries: [] };
+    var cutoff = nowMs() - FEED_CACHE_TTL_MS;
+    cache.entries = cache.entries.filter(function(entry){
+      return !!(entry && entry.url && entry.ts && entry.ts >= cutoff && typeof entry.html === 'string');
+    });
+    return { entries: cache.entries };
+  }
+  function writeFeedCache(entries){
+    var keep = (entries || []).slice(0, FEED_CACHE_MAX);
+    if (!keep.length) {
+      try { window.sessionStorage.removeItem(FEED_CACHE_KEY); } catch(e){}
+      return;
+    }
+    while (keep.length) {
+      try {
+        window.sessionStorage.setItem(FEED_CACHE_KEY, JSON.stringify({ entries: keep }));
+        return;
+      } catch(e) {
+        keep.pop();
+      }
+    }
+    try { window.sessionStorage.removeItem(FEED_CACHE_KEY); } catch(e){}
+  }
+  function markFeedReturn(url){
+    try { window.sessionStorage.setItem(FEED_MARK_KEY, JSON.stringify({ url: url, ts: nowMs() })); } catch(e){}
+  }
+  function shouldRestoreFromMark(url){
+    var skip = loadSession(FEED_SKIP_RESTORE_KEY, null);
+    if (skip && skip.url && skip.ts) {
+      if ((nowMs() - skip.ts) <= FEED_SKIP_RESTORE_TTL_MS && skip.url === url) {
+        return false;
+      }
+      try { window.sessionStorage.removeItem(FEED_SKIP_RESTORE_KEY); } catch(e){}
+    }
+    var mark = loadSession(FEED_MARK_KEY, null);
+    if (!mark || !mark.url || !mark.ts) return false;
+    if ((nowMs() - mark.ts) > FEED_MARK_TTL_MS) {
+      try { window.sessionStorage.removeItem(FEED_MARK_KEY); } catch(e){}
+      return false;
+    }
+    if (mark.url !== url) return false;
+    try { window.sessionStorage.removeItem(FEED_MARK_KEY); } catch(e){}
+    return true;
+  }
+  function saveFeedSnapshot(){
+    if (!isFeedPath(location.pathname)) return;
+    var container = getFeedContainer();
+    if (!container) return;
+    var url = currentUrl();
+    var cache = readFeedCache();
+    var entries = (cache && cache.entries) ? cache.entries : [];
+    entries = entries.filter(function(entry){ return entry.url !== url; });
+    entries.unshift({
+      url: url,
+      html: container.innerHTML,
+      scrollY: (window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0),
+      ts: nowMs()
+    });
+    writeFeedCache(entries);
+    markFeedReturn(url);
+  }
+  function restoreFeedSnapshotIfBack(){
+    if (!isFeedPath(location.pathname)) return false;
+    var url = currentUrl();
+    if (!shouldRestoreFromMark(url)) return false;
+    var cache = readFeedCache();
+    var entries = (cache && cache.entries) ? cache.entries : [];
+    var match = null;
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i] && entries[i].url === url) { match = entries[i]; break; }
+    }
+    if (!match) return false;
+    var container = getFeedContainer();
+    if (!container) return false;
+    container.innerHTML = match.html;
+    setTimeout(function(){ window.scrollTo(0, Number(match.scrollY) || 0); }, 0);
+    return true;
+  }
+  function ensurePtrUi(){
+    if ($('orm-ptr')) return;
+    var wrap = document.createElement('div');
+    wrap.id = 'orm-ptr';
+    wrap.innerHTML = '<div id="orm-ptr-inner">Pull to refresh</div>';
+    document.body.appendChild(wrap);
+  }
+  function updatePtrUi(){
+    var inner = $('orm-ptr-inner');
+    if (!inner) return;
+    if (ptrPull > 0) document.body.classList.add('orm-ptr-visible');
+    else document.body.classList.remove('orm-ptr-visible');
+    if (ptrPull >= PTR_THRESHOLD_PX) {
+      document.body.classList.add('orm-ptr-ready');
+      inner.textContent = 'Release to refresh';
+    } else {
+      document.body.classList.remove('orm-ptr-ready');
+      inner.textContent = 'Pull to refresh';
+    }
+  }
+  function resetPtrUi(){
+    ptrPull = 0;
+    document.body.classList.remove('orm-ptr-visible');
+    document.body.classList.remove('orm-ptr-ready');
+  }
+  function triggerPullRefresh(){
+    if (ptrReloading) return;
+    ptrReloading = true;
+    try {
+      window.sessionStorage.setItem(FEED_SKIP_RESTORE_KEY, JSON.stringify({ url: currentUrl(), ts: nowMs() }));
+    } catch(e){}
+    var inner = $('orm-ptr-inner');
+    if (inner) {
+      document.body.classList.add('orm-ptr-visible');
+      document.body.classList.remove('orm-ptr-ready');
+      inner.textContent = 'Refreshing...';
+    }
+    location.reload();
+  }
+  function installPullToRefresh(){
+    if (window.__ormPtrInstalled) return;
+    window.__ormPtrInstalled = true;
+    ensurePtrUi();
+    document.addEventListener('touchstart', function(e){
+      if (!isFeedPath(location.pathname) || document.body.classList.contains('orm-open') || !atTop()) { ptrActive = false; return; }
+      if (!e.touches || e.touches.length !== 1) { ptrActive = false; return; }
+      ptrActive = true;
+      ptrStartY = e.touches[0].clientY;
+      ptrPull = 0;
+      updatePtrUi();
+    }, { passive: true });
+    document.addEventListener('touchmove', function(e){
+      if (!ptrActive || ptrReloading) return;
+      if (!e.touches || !e.touches.length) return;
+      var dy = e.touches[0].clientY - ptrStartY;
+      if (dy <= 0 || !atTop()) {
+        ptrActive = false;
+        resetPtrUi();
+        return;
+      }
+      ptrPull = Math.min(PTR_MAX_PULL_PX, dy * 0.6);
+      updatePtrUi();
+      if (dy > 8) e.preventDefault();
+    }, { passive: false });
+    document.addEventListener('touchend', function(){
+      if (!ptrActive || ptrReloading) { resetPtrUi(); ptrActive = false; return; }
+      var shouldRefresh = ptrPull >= PTR_THRESHOLD_PX;
+      ptrActive = false;
+      resetPtrUi();
+      if (shouldRefresh) triggerPullRefresh();
+    }, { passive: true });
+    document.addEventListener('touchcancel', function(){ ptrActive = false; resetPtrUi(); }, { passive: true });
+  }
 
   function indexOfCI(arr, name){
     var l = name.toLowerCase();
@@ -777,6 +992,7 @@ function ormInit() {
   function installOnce(){
     if (window.__ormGlobals) return;
     window.__ormGlobals = true;
+    installPullToRefresh();
 
     /* capture-phase rewrite catches links added after the initial sweep */
     document.addEventListener('click', function(e){
@@ -785,11 +1001,23 @@ function ormInit() {
       if (!a) return;
       var r = rewriteHref(a.href);
       if (r) a.href = r;
+      if (isFeedPath(location.pathname)) {
+        try {
+          var u = new URL(a.href, location.href);
+          if (!(u.origin === location.origin && u.pathname === location.pathname && u.search === location.search)) {
+            saveFeedSnapshot();
+          }
+        } catch(e) {
+          saveFeedSnapshot();
+        }
+      }
     }, true);
+    window.addEventListener('pagehide', function(){ saveFeedSnapshot(); });
   }
 
   /* ---- run ------------------------------------------------------------- */
   installOnce();
+  restoreFeedSnapshotIfBack();
   sweepLinks(document);
   addRecent(currentSub());
   buildUI();
