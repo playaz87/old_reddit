@@ -73,6 +73,10 @@ body {
 }
 
 a, a:link { color: var(--orm-link) !important; }
+/* Links use a custom long-press handler (copy URL) and tap handler (open), so
+   suppress the native iOS callout / text-selection that would otherwise fight
+   it. Body text elsewhere stays selectable. */
+a, a:link { -webkit-touch-callout: none !important; -webkit-user-select: none !important; user-select: none !important; }
 .tagline, .tagline *, .subreddit, .domain, .domain a,
 .flat-list.buttons li a, .comment .tagline a { color: var(--orm-muted) !important; }
 
@@ -552,6 +556,36 @@ body.orm-ptr-visible #orm-ptr { transform: translateY(0) !important; }
 body.orm-ptr-ready #orm-ptr-inner {
   color: var(--orm-accent) !important;
 }
+
+/* ===================================================================== *
+ *  Transient toast (e.g. "Link copied" after a long-press)
+ * ===================================================================== */
+#orm-toast {
+  position: fixed !important;
+  left: 50% !important;
+  bottom: 32px !important;
+  transform: translateX(-50%) translateY(8px) !important;
+  max-width: 80% !important;
+  padding: 10px 16px !important;
+  background: var(--orm-card-2) !important;
+  color: var(--orm-text) !important;
+  border: 1px solid var(--orm-border) !important;
+  border-radius: 999px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity .18s ease, transform .18s ease !important;
+  z-index: 2147483605 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+#orm-toast.on {
+  opacity: 1 !important;
+  transform: translateX(-50%) translateY(0) !important;
+}
 `;
 
 /**
@@ -989,16 +1023,127 @@ function ormInit() {
     }
   }
 
+  /* ---- external links: tap opens in the system browser ----------------- */
+  function isRedditHost(h){
+    h = String(h).toLowerCase();
+    return /(^|\\.)reddit\\.com$/.test(h)
+      || /(^|\\.)redd\\.it$/.test(h)
+      || /(^|\\.)redditstatic\\.com$/.test(h)
+      || /(^|\\.)redditmedia\\.com$/.test(h);
+  }
+  /* Returns a normalized http(s) URL when 'raw' points off reddit, else null.
+     Custom schemes (mailto:, tel:, intent:, ...) return null so the OS / plugin
+     keeps handling them. */
+  function externalUrl(raw){
+    try {
+      var u = new URL(raw, location.href);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+      if (isRedditHost(u.hostname)) return null;
+      return u.href;
+    } catch(e){ return null; }
+  }
+  function openExternal(url){
+    try {
+      if (window.mobileApp && window.mobileApp.postMessage) {
+        window.mobileApp.postMessage({ detail: { action: 'openExternal', url: url } });
+        return;
+      }
+    } catch(e){}
+    /* outside the app shell (e.g. plain browser dev) — best-effort fallback */
+    try { window.open(url, '_blank'); } catch(e){}
+  }
+
+  /* ---- long-press a link to copy its URL ------------------------------- */
+  var LP_MS = 500;
+  var LP_MOVE_PX = 12;
+  var lpTimer = null, lpStartX = 0, lpStartY = 0, lpFired = false;
+
+  function ormToast(msg){
+    var t = $('orm-toast');
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'orm-toast';
+      document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    t.classList.add('on');
+    if (t.__ormHideTimer) clearTimeout(t.__ormHideTimer);
+    t.__ormHideTimer = setTimeout(function(){ t.classList.remove('on'); }, 1600);
+  }
+  function copyText(text){
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch(e){}
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      var ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch(e){ return false; }
+  }
+  function cancelLongPress(){
+    if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+  }
+  function installLinkGestures(){
+    document.addEventListener('touchstart', function(e){
+      cancelLongPress();
+      if (!e.touches || e.touches.length !== 1) return;
+      var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (!a) return;
+      lpFired = false;
+      lpStartX = e.touches[0].clientX;
+      lpStartY = e.touches[0].clientY;
+      var href = a.href;
+      lpTimer = setTimeout(function(){
+        lpTimer = null;
+        lpFired = true;
+        if (copyText(href)) ormToast('Link copied');
+        else ormToast('Could not copy link');
+        try { if (navigator.vibrate) navigator.vibrate(15); } catch(e){}
+      }, LP_MS);
+    }, true);
+    document.addEventListener('touchmove', function(e){
+      if (!lpTimer || !e.touches || !e.touches.length) return;
+      var dx = e.touches[0].clientX - lpStartX;
+      var dy = e.touches[0].clientY - lpStartY;
+      if (Math.abs(dx) > LP_MOVE_PX || Math.abs(dy) > LP_MOVE_PX) cancelLongPress();
+    }, true);
+    document.addEventListener('touchend', cancelLongPress, true);
+    document.addEventListener('touchcancel', cancelLongPress, true);
+    /* a long-press should never also follow through as a tap/navigation */
+    document.addEventListener('contextmenu', function(e){
+      var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (a) e.preventDefault();
+    }, true);
+  }
+
   function installOnce(){
     if (window.__ormGlobals) return;
     window.__ormGlobals = true;
     installPullToRefresh();
+    installLinkGestures();
 
     /* capture-phase rewrite catches links added after the initial sweep */
     document.addEventListener('click', function(e){
       var t = e.target;
       var a = t && t.closest ? t.closest('a[href]') : null;
       if (!a) return;
+      /* swallow the synthetic tap that fires after a long-press copy */
+      if (lpFired) { lpFired = false; e.preventDefault(); e.stopPropagation(); return; }
+      /* non-reddit links open in the system browser, not this WebView */
+      var ext = externalUrl(a.href);
+      if (ext) { e.preventDefault(); e.stopPropagation(); openExternal(ext); return; }
       var r = rewriteHref(a.href);
       if (r) a.href = r;
       if (isFeedPath(location.pathname)) {

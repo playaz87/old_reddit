@@ -12,7 +12,7 @@ import { buildInjectionCode } from './old-reddit-mobile';
  * page load. See ./old-reddit-mobile.ts for the styling itself.
  */
 
-const START_URL = 'https://old.reddit.com/';
+const START_URL = 'https://old.reddit.com/r/all/';
 
 /** Re-inject the viewport + stylesheet into whatever page is currently loaded. */
 async function injectStyles(): Promise<void> {
@@ -20,6 +20,26 @@ async function injectStyles(): Promise<void> {
     await InAppBrowser.executeScript({ code: buildInjectionCode() });
   } catch {
     /* webview may be momentarily unavailable mid-navigation — ignore */
+  }
+}
+
+/**
+ * Open a URL in the device's default browser (Chrome Custom Tab on Android,
+ * SFSafariViewController on iOS) rather than the managed reddit WebView. The
+ * injected page script (see ./old-reddit-mobile.ts) intercepts taps on
+ * non-reddit links and asks for this via window.mobileApp.postMessage.
+ */
+async function openExternal(url: string): Promise<void> {
+  try {
+    await InAppBrowser.open({
+      url,
+      showArrow: true,
+      showTitle: true,
+      urlBarHidingEnabled: true,
+      toolbarColor: '#1a1a1b',
+    });
+  } catch {
+    /* nothing sensible to do if the OS can't present a browser — ignore */
   }
 }
 
@@ -44,6 +64,15 @@ async function launch(): Promise<void> {
 
   await InAppBrowser.addListener('pageLoadError', () => {
     setStatus('Could not load reddit. Check your connection and reopen the app.');
+  });
+
+  // The injected page script posts here to hand a non-reddit link off to the
+  // system browser instead of letting it load inside the reddit WebView.
+  await InAppBrowser.addListener('messageFromWebview', (event) => {
+    const detail = event?.detail;
+    if (detail && detail.action === 'openExternal' && typeof detail.url === 'string') {
+      void openExternal(detail.url);
+    }
   });
 
   try {
