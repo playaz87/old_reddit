@@ -14,12 +14,14 @@ reddit username/password inside the app and the session persists.
 - **Subreddit switcher** — a fixed top bar + slide-in drawer (tap ☰). From it
   you can:
   - type any subreddit and go straight to it (Enter or the "Go to r/…" row),
+  - visit a user profile by typing `u/name` (or `/u/name`, `user/name`); a bare
+    name also offers a "Go to u/…" row,
   - search *all* of reddit as you type (not just subs you follow),
   - browse your **subscribed** subreddits,
   - jump to **Front Page / Popular / All**.
-- **Favourites & history (RIF-style)** — star any subreddit (★ in the bar or
-  next to any row) to save it without subscribing, and every subreddit you visit
-  is remembered under **Recent**. Both persist across sessions in the
+- **Favourites & history (RIF-style)** — star any subreddit or user profile (★
+  in the bar or next to any row) to save it without subscribing/following, and
+  every subreddit or profile you visit is remembered under **Recent**. Both persist across sessions in the
   old.reddit.com origin's `localStorage`.
 - **No bounce to new reddit** — any `*.reddit.com` link (galleries, media,
   "continue this thread", cross-posts) is rewritten to `old.reddit.com`, so

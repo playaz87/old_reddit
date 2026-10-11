@@ -805,11 +805,16 @@ function ormInit() {
     for (var i=0;i<arr.length;i++){ if (String(arr[i]).toLowerCase() === l) return i; }
     return -1;
   }
+  /* Favourites / recent hold "keys": a bare subreddit name ("pics") or a user
+     profile as "u/<name>". Subreddit names can't contain "/", so the two never
+     collide and lists saved before user support stay valid. */
+  function isUserKey(k){ return /^u\\//i.test(String(k)); }
+  function keyLabel(k){ return isUserKey(k) ? 'u/' + String(k).slice(2) : 'r/' + k; }
   function isFav(name){ return indexOfCI(getFavs(), name) >= 0; }
   function toggleFav(name){
     var f = getFavs(); var i = indexOfCI(f, name);
     if (i >= 0) { f.splice(i,1); }
-    else { f.push(name); f.sort(function(a,b){ return a.toLowerCase() < b.toLowerCase() ? -1 : 1; }); }
+    else { f.push(name); f.sort(function(a,b){ return keyLabel(a).toLowerCase() < keyLabel(b).toLowerCase() ? -1 : 1; }); }
     store('orm_favs', f);
   }
   function addRecent(name){
@@ -822,6 +827,22 @@ function ormInit() {
   }
 
   function cleanName(n){ return String(n).replace(/^\\/?(r\\/)?/i, '').replace(/\\/.*$/, '').trim(); }
+  var USER_RE = /^\\/?(u|user)\\/([A-Za-z0-9_-]+)/i;
+  function isUserName(n){ return /^[A-Za-z0-9_-]{3,20}$/.test(n); }
+  /* Typed input -> key: "u/x", "/u/x", "user/x" are users; anything else is a sub. */
+  function parseTarget(q){
+    var m = String(q).trim().match(USER_RE);
+    return m ? 'u/' + m[2] : cleanName(q);
+  }
+  function currentUser(){
+    var m = location.pathname.match(/^\\/(?:u|user)\\/([A-Za-z0-9_-]+)/i);
+    return m ? m[1] : null;
+  }
+  /* The starrable thing on this page: subreddit name or "u/<name>", else null. */
+  function currentKey(){
+    var s = currentSub(); if (s) return s;
+    var u = currentUser(); return u ? 'u/' + u : null;
+  }
   function currentSub(){
     var m = location.pathname.match(/^\\/r\\/([^\\/]+)/i);
     if (!m) return null;
@@ -832,12 +853,14 @@ function ormInit() {
     var s = currentSub();
     if (s) return 'r/' + s;
     if (location.pathname === '/' || /^\\/(hot|new|top|rising|controversial|best)\\b/.test(location.pathname)) return 'Front Page';
-    if (/^\\/user\\//i.test(location.pathname)) return location.pathname.replace(/\\/$/, '').replace(/^\\/user\\//i, 'u/');
+    var u = currentUser(); if (u) return 'u/' + u;
     if (location.pathname.length > 1) return location.pathname;
     return 'reddit';
   }
 
   function goSub(name){ name = cleanName(name); if (name) location.assign('https://old.reddit.com/r/' + encodeURIComponent(name) + '/'); }
+  function goUser(name){ if (name) location.assign('https://old.reddit.com/user/' + encodeURIComponent(name) + '/'); }
+  function goKey(k){ if (!k) return; if (isUserKey(k)) goUser(String(k).slice(2)); else goSub(k); }
   function goPath(p){ location.assign('https://old.reddit.com' + p); }
 
   function fetchSubs(done){
@@ -864,8 +887,8 @@ function ormInit() {
   function rowHtml(name){
     var on = isFav(name) ? ' on' : '';
     var glyph = isFav(name) ? '\\u2605' : '\\u2606';
-    return '<div class="orm-row" data-sub="' + esc(name) + '">'
-      + '<span class="orm-row-name">r/' + esc(name) + '</span>'
+    return '<div class="orm-row" data-key="' + esc(name) + '">'
+      + '<span class="orm-row-name">' + esc(keyLabel(name)) + '</span>'
       + '<button class="orm-star' + on + '" data-star="' + esc(name) + '" aria-label="favourite">' + glyph + '</button>'
       + '</div>';
   }
@@ -877,7 +900,7 @@ function ormInit() {
   }
   function filterCI(arr, ql){
     if (!ql) return arr.slice();
-    return arr.filter(function(n){ return String(n).toLowerCase().indexOf(ql) >= 0; });
+    return arr.filter(function(n){ return keyLabel(n).toLowerCase().indexOf(ql) >= 0; });
   }
 
   function render(){
@@ -891,9 +914,16 @@ function ormInit() {
       + '<button class="orm-chip" data-path="/r/all/">All</button>'
       + '</div>';
 
-    if (q) {
-      html += '<div class="orm-row orm-go" data-sub="' + esc(q) + '">'
-        + '<span class="orm-row-name">Go to r/' + esc(cleanName(q)) + '</span>'
+    var target = q ? parseTarget(q) : '';
+    var goKeys = [];
+    if (target) {
+      goKeys.push(target);
+      /* a bare name could be either — offer the user profile as well */
+      if (!isUserKey(target) && isUserName(target)) goKeys.push('u/' + target);
+    }
+    for (var g = 0; g < goKeys.length; g++) {
+      html += '<div class="orm-row orm-go" data-key="' + esc(goKeys[g]) + '">'
+        + '<span class="orm-row-name">Go to ' + esc(keyLabel(goKeys[g])) + '</span>'
         + '<span class="orm-go-arrow">\\u2192</span></div>';
     }
 
@@ -905,7 +935,7 @@ function ormInit() {
 
     var rc = $('orm-results');
     rc.innerHTML = '';
-    if (q.length >= 2) {
+    if (q.length >= 2 && !isUserKey(target)) {
       searchNames(q, function(names){
         if ($('orm-search').value.trim() !== q) return; /* stale */
         rc.innerHTML = sectionHtml('More subreddits', names.slice(0, 25));
@@ -932,7 +962,7 @@ function ormInit() {
   function updateBar(){
     var t = $('orm-title'); if (t) t.textContent = currentLabel();
     var fb = $('orm-fav-btn'); if (!fb) return;
-    var s = currentSub();
+    var s = currentKey();
     if (s) {
       fb.style.display = 'block';
       var on = isFav(s);
@@ -949,9 +979,9 @@ function ormInit() {
     var bar = document.createElement('div');
     bar.id = 'orm-bar';
     bar.innerHTML =
-      '<button id="orm-menu-btn" aria-label="subreddits">\\u2630</button>'
+      '<button id="orm-menu-btn" aria-label="subreddits and users">\\u2630</button>'
       + '<div id="orm-title"></div>'
-      + '<button id="orm-fav-btn" aria-label="favourite current subreddit"></button>';
+      + '<button id="orm-fav-btn" aria-label="favourite current subreddit or user"></button>';
     document.body.appendChild(bar);
 
     var backdrop = document.createElement('div');
@@ -962,7 +992,7 @@ function ormInit() {
     drawer.id = 'orm-drawer';
     drawer.innerHTML =
       '<div id="orm-drawer-head">'
-      + '<input id="orm-search" type="text" inputmode="search" placeholder="Go to or search subreddits\\u2026"'
+      + '<input id="orm-search" type="text" inputmode="search" placeholder="Subreddit or u/user\\u2026"'
       + ' autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" /></div>'
       + '<div id="orm-scroll"><div id="orm-list"></div><div id="orm-results"></div></div>';
     document.body.appendChild(drawer);
@@ -971,7 +1001,7 @@ function ormInit() {
     $('orm-title').addEventListener('click', openDrawer);
     backdrop.addEventListener('click', closeDrawer);
     $('orm-fav-btn').addEventListener('click', function(){
-      var s = currentSub();
+      var s = currentKey();
       if (s) { toggleFav(s); updateBar(); if (document.body.classList.contains('orm-open')) render(); }
     });
 
@@ -981,7 +1011,7 @@ function ormInit() {
       if (e.key === 'Enter' || e.keyCode === 13) {
         e.preventDefault();
         var q = search.value.trim();
-        if (q) goSub(q);
+        if (q) goKey(parseTarget(q));
       }
     });
 
@@ -992,7 +1022,7 @@ function ormInit() {
       var chip = t && t.closest ? t.closest('.orm-chip') : null;
       if (chip) { goPath(chip.getAttribute('data-path')); return; }
       var row = t && t.closest ? t.closest('.orm-row') : null;
-      if (row) { goSub(row.getAttribute('data-sub')); return; }
+      if (row) { goKey(row.getAttribute('data-key')); return; }
     });
 
     document.addEventListener('keydown', function(e){
@@ -1164,7 +1194,7 @@ function ormInit() {
   installOnce();
   restoreFeedSnapshotIfBack();
   sweepLinks(document);
-  addRecent(currentSub());
+  addRecent(currentKey());
   buildUI();
 }
 `;
